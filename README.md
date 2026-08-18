@@ -16,22 +16,22 @@ use YAML
 ## Read configuration
 
 ```sx
-var config = try YAML.read("application.yml")
-var window = try config.root().mapping("window")
+var config = YAML.read("application.yml")
+var window = config.root().mapping("window")
 
-let width = try window.integer("width")
-let fullscreen = try window.boolean("fullscreen")
+let width = window.integer("width")
+let fullscreen = window.boolean("fullscreen")
 ```
 
-Missing keys, unexpected node kinds and invalid scalar projections are
-reported as `AccessError`. Every parsed node retains its source line and
-column. Reading a path returns `ReadError`, which distinguishes file failures
-from source-located YAML failures.
+The ordinary API returns the requested value directly and stops with a precise
+diagnostic for a missing key, unexpected node kind, invalid scalar, malformed
+document or inaccessible file. Every parsed node retains its source line and
+column.
 
 An embedded YAML file is ordinary text and uses the same parser:
 
 ```sx
-let defaults = try YAML.parse(embed_text("Config/defaults.yml"))
+let defaults = YAML.parse(embed_text("Config/defaults.yml"))
 ```
 
 See [ReadEmbeddedConfiguration.sx](Examples/ReadEmbeddedConfiguration.sx)
@@ -43,9 +43,9 @@ Mappings accept direct string, integer and boolean values as well as arbitrary
 `Node` values:
 
 ```sx
-try window.set("width", 1920)
-try window.set("fullscreen", true)
-try YAML.write("application.yml", config)
+window.set("width", 1920)
+window.set("fullscreen", true)
+YAML.write("application.yml", config)
 ```
 
 Comments, mapping order, collection style, scalar style, tags, anchors and
@@ -80,7 +80,7 @@ let options = YAML.ParseOptions(
     maximum_aliases:10000,
 )
 
-let world = try YAML.read("Scenes/world.yml", options)
+let world = YAML.read("Scenes/world.yml", options)
 ```
 
 Ordinary callers should use `read(path)` and `parse(text)` without constructing
@@ -91,6 +91,28 @@ The current parser covers block and flow mappings and sequences, plain and
 quoted scalars, literal and folded block scalars, comments, tags, anchors,
 aliases and document streams. Parse and access failures never silently coerce
 an unexpected value into an application setting.
+
+## Handle errors deliberately
+
+Applications that recover from invalid input can opt into `try_parse`,
+`try_parse_stream`, `try_read`, `try_read_stream`, `try_emit`, `try_write` and
+the node operations `try_require`, `try_mapping`, `try_sequence`, `try_string`,
+`try_boolean`, `try_integer`, `try_at`, `try_append` and `try_set`:
+
+```sx
+match YAML.try_read("application.yml") {
+    success(config) => { print(config.root().string("application")) }
+    failure(error) => { /* recover, report or use defaults */ }
+}
+```
+
+`ReadError` distinguishes file failures from parse failures; `WriteError`
+distinguishes emission from file failures. Fallible construction remains
+available through `try_number_text` and `try_alias`.
+
+[RecoverInvalidConfiguration.sx](Examples/RecoverInvalidConfiguration.sx)
+shows a complete recovery path: report invalid user YAML, then continue with a
+known-good default document.
 
 ## Development
 
