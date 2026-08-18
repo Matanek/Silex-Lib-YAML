@@ -1,0 +1,26 @@
+use YAML
+
+func print_width(window:YAML.Node) {
+    match window.integer("width") {
+        failure(error) => { print(error.detail) }
+        success(width) => { print("Default window width: $(width)") }
+    }
+}
+
+func inspect(document:YAML.Document) {
+    var root = document.root()
+    match root.mapping("window") {
+        failure(error) => { print(error.detail) }
+        success(window) => { print_width(window) }
+    }
+}
+
+func main() {
+    let source = embed_text("Defaults.yml")
+    match YAML.parse(source) {
+        failure(error) => {
+            print("Invalid embedded configuration at $(error.line):$(error.column): $(error.detail)")
+        }
+        success(document) => { inspect(document) }
+    }
+}

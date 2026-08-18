@@ -1,0 +1,31 @@
+use YAML
+
+func print_document(document:YAML.Document) {
+    match YAML.emit(document) {
+        failure(error) => { print(error.detail) }
+        success(text) => { print(text) }
+    }
+}
+
+func update_audio(audio:YAML.Node, document:YAML.Document) {
+    match audio.set("volume", 65) {
+        failure(error) => { print(error.detail) }
+        success => { print_document(document) }
+    }
+}
+
+func edit(document:YAML.Document) {
+    var root = document.root()
+    match root.mapping("audio") {
+        failure(error) => { print(error.detail) }
+        success(audio) => { update_audio(audio, document) }
+    }
+}
+
+func main() {
+    let source = "# User settings\naudio:\n  volume: 80\n  muted: false\n"
+    match YAML.parse(source) {
+        failure(error) => { print(error.detail) }
+        success(document) => { edit(document) }
+    }
+}

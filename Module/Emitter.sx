@@ -1,0 +1,303 @@
+use Interop.C
+use STD.Text.UTF8.bytes as utf8_bytes
+use YAML.Model.Kind
+use YAML.Model.Node
+use YAML.Model.Document
+use YAML.Model.Stream
+
+public enum EmitErrorKind {
+    invalid_indentation
+    invalid_anchor
+    unknown_alias
+}
+
+public struct EmitError {
+    let kind:EmitErrorKind
+    let detail:str
+}
+
+public struct EmitOptions {
+    let indentation:int
+}
+
+package func default_emit_options() EmitOptions { return EmitOptions(indentation:2) }
+
+package func emit_document(document:Document, options:EmitOptions) Result<str, EmitError> {
+    if options.indentation <= 0 || options.indentation > 16 {
+        return Result<str, EmitError>.failure(EmitError(kind:EmitErrorKind.invalid_indentation(), detail:"YAML indentation must be between 1 and 16 spaces"))
+    }
+    var anchors:str[] = []
+    match validate_references(document.root(), anchors) {
+        failure(error) => { return Result<str, EmitError>.failure(error) }
+        success => {}
+    }
+    var output:uint8[] = []
+    write_document(output, document, options, false)
+    let view = @output[0:output.count()]
+    return Result<str, EmitError>.success(C.string(view))
+}
+
+package func emit_stream(stream:Stream, options:EmitOptions) Result<str, EmitError> {
+    if options.indentation <= 0 || options.indentation > 16 {
+        return Result<str, EmitError>.failure(EmitError(kind:EmitErrorKind.invalid_indentation(), detail:"YAML indentation must be between 1 and 16 spaces"))
+    }
+    var output:uint8[] = []
+    var index = 0
+    while index < stream.count() {
+        var document = stream.document(index)
+        var anchors:str[] = []
+        match validate_references(document.root(), anchors) {
+            failure(error) => { return Result<str, EmitError>.failure(error) }
+            success => {}
+        }
+        write_document(output, document, options, true)
+        index++
+    }
+    return Result<str, EmitError>.success(output_text(output))
+}
+
+func write_document(output:&uint8[], document:Document, options:EmitOptions, stream_mode:bool) {
+    write_comments(output, document.leading_comments(), 0)
+    if stream_mode || document.has_explicit_start() { write_text(output, "---\n") }
+    var root = document.root()
+    write_node(output, root, 0, options, false)
+    if output.count() == 0 || output[output.count() - 1] != 10 { output.append(10 as uint8) }
+    write_comments(output, document.trailing_comments(), 0)
+    if document.has_explicit_end() { write_text(output, "...\n") }
+}
+
+func write_node(output:&uint8[], value:Node, indent:int, options:EmitOptions, include_comments:bool) {
+    if include_comments { write_comments(output, value.leading_comments(), indent) }
+    write_properties(output, value)
+    if value.kind() == Kind.alias() {
+        write_text(output, "*")
+        if name = value.alias_name() { write_text(output, name) }
+        return
+    }
+    if value.kind() == Kind.scalar() { write_scalar(output, value, indent, options); return }
+    if flow_style(value) { write_flow_collection(output, value, indent, options); return }
+    if value.kind() == Kind.sequence() { write_block_sequence(output, value, indent, options) }
+    else { write_block_mapping(output, value, indent, options) }
+}
+
+func write_properties(output:&uint8[], value:Node) {
+    if tag = value.tag() { write_text(output, "!"); write_text(output, tag); write_text(output, " ") }
+    if anchor = value.anchor() { write_text(output, "&"); write_text(output, anchor); write_text(output, " ") }
+}
+
+func write_scalar(output:&uint8[], value:Node, indent:int, options:EmitOptions) {
+    let text = value.scalar_text_value()
+    let style = value.scalar_style_code()
+    if style == 1 { write_text(output, text); return }
+    if style == 2 {
+        write_text(output, "'")
+        for byte in utf8_bytes(text) {
+            if byte == 39 { write_text(output, "''") } else { output.append(byte) }
+        }
+        write_text(output, "'")
+        return
+    }
+    if style == 3 { write_double_quoted(output, text); return }
+    if style == 4 { write_text(output, "|") } else { write_text(output, ">") }
+    write_text(output, "\n")
+    write_block_text(output, text, indent + options.indentation)
+}
+
+func write_block_sequence(output:&uint8[], value:Node, indent:int, options:EmitOptions) {
+    if value.count() == 0 { write_text(output, "[]"); return }
+    var index = 0
+    while index < value.count() {
+        var item = value.sequence_item(index)
+        if index > 0 { write_indent(output, indent) }
+        write_comments(output, item.leading_comments(), indent)
+        write_text(output, "-")
+        if block_collection(item) {
+            write_inline_comment(output, item)
+            write_text(output, "\n")
+            write_indent(output, indent + options.indentation)
+            write_node(output, item, indent + options.indentation, options, false)
+        } else {
+            write_text(output, " ")
+            write_node(output, item, indent + options.indentation, options, false)
+            write_inline_comment(output, item)
+        }
+        ensure_newline(output)
+        index++
+    }
+}
+
+func write_block_mapping(output:&uint8[], value:Node, indent:int, options:EmitOptions) {
+    if value.count() == 0 { write_text(output, "{}"); return }
+    var index = 0
+    while index < value.count() {
+        var key = value.mapping_key(index)
+        var entry_value = value.mapping_value(index)
+        if index > 0 { write_indent(output, indent) }
+        write_comments(output, entry_value.leading_comments(), indent)
+        write_flow_node(output, key, indent, options)
+        write_text(output, ":")
+        if block_collection(entry_value) {
+            write_inline_comment(output, entry_value)
+            write_text(output, "\n")
+            write_indent(output, indent + options.indentation)
+            write_node(output, entry_value, indent + options.indentation, options, false)
+        } else {
+            write_text(output, " ")
+            write_node(output, entry_value, indent + options.indentation, options, false)
+            write_inline_comment(output, entry_value)
+        }
+        ensure_newline(output)
+        index++
+    }
+}
+
+func write_flow_collection(output:&uint8[], value:Node, indent:int, options:EmitOptions) {
+    if value.kind() == Kind.sequence() {
+        write_text(output, "[")
+        var index = 0
+        while index < value.count() {
+            if index > 0 { write_text(output, ", ") }
+            var item = value.sequence_item(index)
+            write_flow_node(output, item, indent, options)
+            index++
+        }
+        write_text(output, "]")
+        return
+    }
+    write_text(output, "{")
+    var index = 0
+    while index < value.count() {
+        if index > 0 { write_text(output, ", ") }
+        var key = value.mapping_key(index)
+        var entry_value = value.mapping_value(index)
+        write_flow_node(output, key, indent, options)
+        write_text(output, ": ")
+        write_flow_node(output, entry_value, indent, options)
+        index++
+    }
+    write_text(output, "}")
+}
+
+func write_flow_node(output:&uint8[], value:Node, indent:int, options:EmitOptions) {
+    write_properties(output, value)
+    if value.kind() == Kind.alias() {
+        write_text(output, "*")
+        if name = value.alias_name() { write_text(output, name) }
+    } elif value.kind() == Kind.scalar() {
+        if value.scalar_style_code() == 4 || value.scalar_style_code() == 5 { write_double_quoted(output, value.scalar_text_value()) }
+        else { write_scalar(output, value, indent, options) }
+    } else { write_flow_collection(output, value, indent, options) }
+}
+
+func write_double_quoted(output:&uint8[], value:str) {
+    write_text(output, "\"")
+    for byte in utf8_bytes(value) {
+        if byte == 34 { write_text(output, "\\\"") }
+        elif byte == 92 { write_text(output, "\\\\") }
+        elif byte == 10 { write_text(output, "\\n") }
+        elif byte == 13 { write_text(output, "\\r") }
+        elif byte == 9 { write_text(output, "\\t") }
+        elif byte == 0 { write_text(output, "\\0") }
+        else { output.append(byte) }
+    }
+    write_text(output, "\"")
+}
+
+func write_block_text(output:&uint8[], value:str, indent:int) {
+    let bytes = utf8_bytes(value)
+    write_indent(output, indent)
+    var index = 0
+    while index < bytes.count() {
+        output.append(bytes[index])
+        if bytes[index] == 10 && index + 1 < bytes.count() { write_indent(output, indent) }
+        index++
+    }
+}
+
+func write_comments(output:&uint8[], values:str[], indent:int) {
+    for comment in values {
+        write_indent(output, indent)
+        if comment == "" { write_text(output, "\n") }
+        else { write_text(output, "# "); write_text(output, comment); write_text(output, "\n") }
+    }
+}
+
+func write_inline_comment(output:&uint8[], value:Node) {
+    if comment = value.inline_comment() { write_text(output, " # "); write_text(output, comment) }
+}
+
+func write_indent(output:&uint8[], count:int) {
+    var index = 0
+    while index < count { output.append(32 as uint8); index++ }
+}
+
+func ensure_newline(output:&uint8[]) {
+    if output.count() == 0 || output[output.count() - 1] != 10 { output.append(10 as uint8) }
+}
+
+func write_text(output:&uint8[], value:str) {
+    for byte in utf8_bytes(value) { output.append(byte) }
+}
+
+func output_text(output:uint8[]) str { return C.string(@output[0:output.count()]) }
+
+func flow_style(value:Node) bool {
+    if style = value.collection_style() { return style == YAML.Model.CollectionStyle.flow() }
+    return false
+}
+
+func block_collection(value:Node) bool {
+    if value.kind() != Kind.sequence() && value.kind() != Kind.mapping() { return false }
+    return !flow_style(value) && value.count() > 0
+}
+
+func block_scalar(value:Node) bool {
+    if value.kind() != Kind.scalar() { return false }
+    if style = value.scalar_style() {
+        return style == YAML.Model.ScalarStyle.literal() || style == YAML.Model.ScalarStyle.folded()
+    }
+    return false
+}
+
+func validate_references(value:Node, anchors:&str[]) Result<void, EmitError> {
+    if alias = value.alias_name() {
+        var found = false
+        for anchor in anchors { if anchor == alias { found = true } }
+        if !found {
+            return Result<void, EmitError>.failure(EmitError(kind:EmitErrorKind.unknown_alias(), detail:"YAML alias '*$(alias)' does not refer to a preceding anchor"))
+        }
+    }
+    if anchor = value.anchor() {
+        if !YAML.Model.valid_anchor_name(anchor) {
+            return Result<void, EmitError>.failure(EmitError(kind:EmitErrorKind.invalid_anchor(), detail:"invalid YAML anchor '&$(anchor)'"))
+        }
+        anchors.append(anchor)
+    }
+    if value.kind() == Kind.sequence() {
+        var index = 0
+        while index < value.count() {
+            var child = value.sequence_item(index)
+            match validate_references(child, anchors) {
+                failure(error) => { return Result<void, EmitError>.failure(error) }
+                success => {}
+            }
+            index++
+        }
+    } elif value.kind() == Kind.mapping() {
+        var index = 0
+        while index < value.count() {
+            var key = value.mapping_key(index)
+            match validate_references(key, anchors) {
+                failure(error) => { return Result<void, EmitError>.failure(error) }
+                success => {}
+            }
+            var entry_value = value.mapping_value(index)
+            match validate_references(entry_value, anchors) {
+                failure(error) => { return Result<void, EmitError>.failure(error) }
+                success => {}
+            }
+            index++
+        }
+    }
+    return Result<void, EmitError>.success()
+}

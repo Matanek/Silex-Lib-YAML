@@ -1,0 +1,11 @@
+{
+  "name": "YAML",
+  "version": "0.1.0",
+  "extensions": [],
+  "requires": {
+    "silex": ">=0.38.20"
+  },
+  "dependencies": {
+    "STD": "^0.16.5"
+  }
+}

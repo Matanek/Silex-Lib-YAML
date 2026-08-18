@@ -1,0 +1,25 @@
+use YAML
+
+func main() {
+    var camera = YAML.mapping()
+    let ignored_camera_id = camera.set("id", "camera")
+    let ignored_camera_type = camera.set("type", "Camera")
+
+    var player = YAML.mapping()
+    let ignored_player_id = player.set("id", "player")
+    let ignored_parent = player.set("parent", "world")
+
+    var entities = YAML.sequence()
+    let ignored_camera = entities.append(camera)
+    let ignored_player = entities.append(player)
+
+    var root = YAML.mapping()
+    let ignored_name = root.set("scene", "Demo")
+    let ignored_entities = root.set("entities", entities)
+    var scene = YAML.document(root)
+
+    match YAML.emit(scene) {
+        failure(error) => { print(error.detail) }
+        success(text) => { print(text) }
+    }
+}

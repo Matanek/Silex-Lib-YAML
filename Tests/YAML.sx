@@ -1,0 +1,200 @@
+use YAML
+use STD.FileSystem
+
+func parsed(text:str) YAML.Document {
+    match YAML.parse(text) {
+        failure(error) => { panic("$(error.line):$(error.column): " + error.detail) }
+        success(document) => { return document }
+    }
+}
+
+func parsed_stream(text:str) YAML.Stream {
+    match YAML.parse_stream(text) {
+        failure(error) => { panic(error.detail) }
+        success(stream) => { return stream }
+    }
+}
+
+func mapping(value:YAML.Node, name:str) YAML.Node {
+    match value.mapping(name) {
+        failure(error) => { panic(error.detail) }
+        success(node) => { return node }
+    }
+}
+
+func required(value:YAML.Node, name:str) YAML.Node {
+    match value.require(name) {
+        failure(error) => { panic(error.detail) }
+        success(node) => { return node }
+    }
+}
+
+func sequence(value:YAML.Node, name:str) YAML.Node {
+    match value.sequence(name) {
+        failure(error) => { panic(error.detail) }
+        success(node) => { return node }
+    }
+}
+
+func at(value:YAML.Node, index:int) YAML.Node {
+    match value.at(index) {
+        failure(error) => { panic(error.detail) }
+        success(node) => { return node }
+    }
+}
+
+func integer(value:YAML.Node, name:str) int {
+    match value.integer(name) {
+        failure(error) => { panic(error.detail) }
+        success(actual) => { return actual }
+    }
+}
+
+func boolean(value:YAML.Node, name:str) bool {
+    match value.boolean(name) {
+        failure(error) => { panic(error.detail) }
+        success(actual) => { return actual }
+    }
+}
+
+func string(value:YAML.Node, name:str) str {
+    match value.string(name) {
+        failure(error) => { panic(error.detail) }
+        success(actual) => { return actual }
+    }
+}
+
+func set_integer(value:YAML.Node, name:str, actual:int) {
+    match value.set(name, actual) { failure(error) => { panic(error.detail) }; success => {} }
+}
+
+func set_boolean(value:YAML.Node, name:str, actual:bool) {
+    match value.set(name, actual) { failure(error) => { panic(error.detail) }; success => {} }
+}
+
+func emitted(document:YAML.Document) str {
+    match YAML.emit(document) {
+        failure(error) => { panic(error.detail) }
+        success(text) => { return text }
+    }
+}
+
+func write_error_detail(error:YAML.WriteError) str {
+    return match error { emit(value) => value.detail; file(value) => value.detail }
+}
+
+func read_error_detail(error:YAML.ReadError) str {
+    return match error { file(value) => value.detail; parse(value) => value.detail }
+}
+
+func written(path:str, document:YAML.Document) {
+    match YAML.write(path, document) {
+        failure(error) => { panic(write_error_detail(error)) }
+        success => {}
+    }
+}
+
+func read_document(path:str) YAML.Document {
+    match YAML.read(path) {
+        failure(error) => { panic(read_error_detail(error)) }
+        success(document) => { return document }
+    }
+}
+
+func anchor(value:YAML.Node) str {
+    if name = value.anchor() { return name }
+    panic("expected YAML anchor")
+}
+
+test "read and modify application configuration" {
+    let source = "# Application settings\nwindow:\n  width: 1280\n  fullscreen: false\n"
+    var document = parsed(source)
+    var root = document.root()
+    var window = mapping(root, "window")
+    assert(integer(window, "width") == 1280, "YAML integer setting")
+    assert(!boolean(window, "fullscreen"), "YAML boolean setting")
+    set_integer(window, "width", 1920)
+    set_boolean(window, "fullscreen", true)
+    let actual = emitted(document)
+    assert(actual == "# Application settings\nwindow:\n  width: 1920\n  fullscreen: true\n", "modified YAML configuration")
+}
+
+test "load and store a scene graph document" {
+    let source = "scene: Demo\nentities:\n  - id: camera\n    transform:\n      position: [0, 2, 8]\n  - id: player\n    parent: world\n"
+    var document = parsed(source)
+    var root = document.root()
+    assert(string(root, "scene") == "Demo", "scene name")
+    var entities = sequence(root, "entities")
+    assert(entities.count() == 2, "scene entities")
+    var player = at(entities, 1)
+    assert(string(player, "id") == "player", "scene entity identity")
+    var reparsed = parsed(emitted(document))
+    assert(sequence(reparsed.root(), "entities").count() == 2, "scene graph round trip")
+}
+
+test "parse an embedded-style string and a document stream" {
+    let embedded = "defaults: &defaults\n  shadows: true\nquality:\n  settings: *defaults\n"
+    var document = parsed(embedded)
+    assert(anchor(mapping(document.root(), "defaults")) == "defaults", "YAML anchor")
+    let encoded = emitted(document)
+    assert(encoded.count() > 0, "anchored YAML emission")
+    var documents = parsed_stream("---\nname: first\n---\nname: second\n")
+    assert(documents.count() == 2, "YAML document stream")
+}
+
+test "write and read a local YAML file" {
+    let path = "/private/tmp/silex-yaml-test.yml"
+    let ignored = FileSystem.remove_file(path)
+    var root = YAML.mapping()
+    match root.set("name", "local") { failure(error) => { panic(error.detail) }; success => {} }
+    match root.set("workers", 4) { failure(error) => { panic(error.detail) }; success => {} }
+    var document = YAML.document(root)
+    written(path, document)
+    var loaded = read_document(path)
+    assert(string(loaded.root(), "name") == "local", "local YAML string")
+    assert(integer(loaded.root(), "workers") == 4, "local YAML integer")
+    match FileSystem.remove_file(path) { failure(error) => { panic(error.detail) }; success => {} }
+}
+
+test "preserve YAML presentation and structured forms" {
+    let source = "title: \"Sc\\u00e8ne\\nDemo\"\ndescription: |-\n  First line\n  Second line\nflags: [true, false, null]\nmaterial: {name: \"Steel\", roughness: 0.5}\nasset: !mesh models/player.mesh\n"
+    var document = parsed(source)
+    var root = document.root()
+    var flags = sequence(root, "flags")
+    assert(flags.count() == 3, "flow sequence")
+    var material = mapping(root, "material")
+    assert(string(material, "name") == "Steel", "flow mapping")
+    var asset = required(root, "asset")
+    if tag = asset.tag() { assert(tag == "mesh", "explicit YAML tag") }
+    else { panic("explicit YAML tag was lost") }
+    var reparsed = parsed(emitted(document))
+    assert(string(reparsed.root(), "title") == "Scène\nDemo", "quoted scalar round trip")
+}
+
+test "explicit parse limits remain opt-in" {
+    let options = YAML.ParseOptions(maximum_bytes:4, maximum_depth:8, maximum_documents:1, maximum_aliases:0)
+    match YAML.parse("name: value", options) {
+        success(document) => { panic("YAML input exceeded its explicit byte limit") }
+        failure(error) => { assert(error.kind == YAML.ParseErrorKind.input_limit(), "YAML input limit error") }
+    }
+}
+
+test "reject an alias without a preceding anchor" {
+    match YAML.parse("value: *missing\n") {
+        success(document) => { panic("unknown YAML alias was accepted") }
+        failure(error) => { assert(error.kind == YAML.ParseErrorKind.unknown_anchor(), "unknown YAML anchor error") }
+    }
+}
+
+test "plain URLs retain their colon" {
+    var document = parsed("endpoint: https://registry.silex-lang.org/v1/index.json\nflow: {endpoint: https://silex-lang.org/docs/}\n")
+    assert(string(document.root(), "endpoint") == "https://registry.silex-lang.org/v1/index.json", "block URL")
+    assert(string(mapping(document.root(), "flow"), "endpoint") == "https://silex-lang.org/docs/", "flow URL")
+}
+
+test "reject tab indentation" {
+    match YAML.parse("window:\n\twidth: 1280\n") {
+        success(document) => { panic("tab-indented YAML was accepted") }
+        failure(error) => { assert(error.kind == YAML.ParseErrorKind.invalid_indentation(), "tab indentation error") }
+    }
+}

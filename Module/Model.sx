@@ -1,0 +1,529 @@
+use YAML.Text.string_bytes
+
+public enum Kind {
+    scalar
+    sequence
+    mapping
+    alias
+}
+
+public enum ScalarKind {
+    null_value
+    boolean
+    integer
+    number
+    string
+}
+
+public enum ScalarStyle {
+    plain
+    single_quoted
+    double_quoted
+    literal
+    folded
+}
+
+public enum CollectionStyle {
+    block
+    flow
+}
+
+public enum AccessErrorKind {
+    missing_key
+    wrong_kind
+    invalid_scalar
+    index_out_of_bounds
+}
+
+public struct AccessError {
+    let kind:AccessErrorKind
+    let subject:str
+    let detail:str
+    let line:int
+    let column:int
+}
+
+public enum BuildErrorKind {
+    invalid_number
+    invalid_anchor
+    invalid_alias
+}
+
+public struct BuildError {
+    let kind:BuildErrorKind
+    let detail:str
+}
+
+public struct Entry {
+    var key:Node
+    var value:Node
+}
+
+public class Node {
+    private let raw_kind:int
+    private var raw_scalar_kind:int
+    private var raw_scalar_style:int
+    private var raw_collection_style:int
+    private var text_value:str
+    private var sequence_values:Node[]
+    private var mapping_entries:Entry[]
+    private var tag_value:str?
+    private var anchor_value:str?
+    private var alias_value:str?
+    private var leading_comment_values:str[]
+    private var inline_comment_value:str?
+    private let source_line:int
+    private let source_column:int
+
+    module init(raw_kind:int, raw_scalar_kind:int, text_value:str, line:int, column:int) {
+        self.raw_kind = raw_kind
+        self.raw_scalar_kind = raw_scalar_kind
+        self.raw_scalar_style = 0
+        self.raw_collection_style = 0
+        self.text_value = text_value
+        self.sequence_values = []
+        self.mapping_entries = []
+        self.tag_value = null
+        self.anchor_value = null
+        self.alias_value = null
+        self.leading_comment_values = []
+        self.inline_comment_value = null
+        self.source_line = line
+        self.source_column = column
+    }
+
+    func kind() Kind {
+        if self.raw_kind == 1 { return Kind.scalar() }
+        if self.raw_kind == 2 { return Kind.sequence() }
+        if self.raw_kind == 3 { return Kind.mapping() }
+        return Kind.alias()
+    }
+
+    func scalar_kind() ScalarKind? {
+        if self.raw_kind != 1 { return null }
+        if self.raw_scalar_kind == 1 { return ScalarKind.null_value() }
+        if self.raw_scalar_kind == 2 { return ScalarKind.boolean() }
+        if self.raw_scalar_kind == 3 { return ScalarKind.integer() }
+        if self.raw_scalar_kind == 4 { return ScalarKind.number() }
+        return ScalarKind.string()
+    }
+
+    func scalar_style() ScalarStyle? {
+        if self.raw_kind != 1 { return null }
+        if self.raw_scalar_style == 1 { return ScalarStyle.plain() }
+        if self.raw_scalar_style == 2 { return ScalarStyle.single_quoted() }
+        if self.raw_scalar_style == 3 { return ScalarStyle.double_quoted() }
+        if self.raw_scalar_style == 4 { return ScalarStyle.literal() }
+        return ScalarStyle.folded()
+    }
+
+    func collection_style() CollectionStyle? {
+        if self.raw_kind != 2 && self.raw_kind != 3 { return null }
+        if self.raw_collection_style == 2 { return CollectionStyle.flow() }
+        return CollectionStyle.block()
+    }
+
+    func line() int { return self.source_line }
+    func column() int { return self.source_column }
+    func tag() str? { return self.tag_value }
+    func anchor() str? { return self.anchor_value }
+    func alias_name() str? { return self.alias_value }
+    func leading_comments() str[] { return copy self.leading_comment_values }
+    func inline_comment() str? { return self.inline_comment_value }
+
+    func set_tag(value:str?) { self.tag_value = value }
+    func set_anchor(value:str?) { self.anchor_value = value }
+    func set_leading_comments(values:str[]) { self.leading_comment_values = values }
+    func set_inline_comment(value:str?) { self.inline_comment_value = value }
+
+    func set_scalar_style(style:ScalarStyle) Result<void, AccessError> {
+        if self.raw_kind != 1 { return self.access_failure(AccessErrorKind.wrong_kind(), "scalar style requires a scalar") }
+        self.raw_scalar_style = scalar_style_code(style)
+        return Result<void, AccessError>.success()
+    }
+
+    func set_collection_style(style:CollectionStyle) Result<void, AccessError> {
+        if self.raw_kind != 2 && self.raw_kind != 3 {
+            return self.access_failure(AccessErrorKind.wrong_kind(), "collection style requires a sequence or mapping")
+        }
+        self.raw_collection_style = collection_style_code(style)
+        return Result<void, AccessError>.success()
+    }
+
+    func as_string() str? {
+        if self.raw_kind != 1 || self.raw_scalar_kind != 5 { return null }
+        return self.text_value
+    }
+
+    func as_boolean() bool? {
+        if self.raw_kind != 1 || self.raw_scalar_kind != 2 { return null }
+        return self.text_value == "true"
+    }
+
+    func as_integer() int? {
+        if self.raw_kind != 1 || self.raw_scalar_kind != 3 { return null }
+        return parse_decimal_integer(self.text_value)
+    }
+
+    func as_number_text() str? {
+        if self.raw_kind != 1 || (self.raw_scalar_kind != 3 && self.raw_scalar_kind != 4) { return null }
+        return self.text_value
+    }
+
+    func as_scalar_text() str? {
+        if self.raw_kind != 1 { return null }
+        return self.text_value
+    }
+
+    func is_null() bool { return self.raw_kind == 1 && self.raw_scalar_kind == 1 }
+
+    func as_sequence() Node[]? {
+        if self.raw_kind != 2 { return null }
+        return copy self.sequence_values
+    }
+
+    func as_mapping() Entry[]? {
+        if self.raw_kind != 3 { return null }
+        return copy self.mapping_entries
+    }
+
+    func count() int {
+        if self.raw_kind == 2 { return self.sequence_values.count() }
+        if self.raw_kind == 3 { return self.mapping_entries.count() }
+        return 0
+    }
+
+    func at(index:int) Result<Node, AccessError> {
+        if self.raw_kind != 2 { return self.access_node_failure(AccessErrorKind.wrong_kind(), "node is not a sequence") }
+        if index < 0 || index >= self.sequence_values.count() {
+            return self.access_node_failure(AccessErrorKind.index_out_of_bounds(), "sequence index is outside its bounds")
+        }
+        return Result<Node, AccessError>.success(self.sequence_values[index])
+    }
+
+    func append(value:Node) Result<void, AccessError> {
+        if self.raw_kind != 2 { return self.access_failure(AccessErrorKind.wrong_kind(), "append requires a sequence") }
+        self.sequence_values.append(value)
+        return Result<void, AccessError>.success()
+    }
+
+    func get(name:str) Node? {
+        if self.raw_kind != 3 { return null }
+        for entry in self.mapping_entries {
+            if text = key_text(entry.key) {
+                if text == name { return entry.value }
+            }
+        }
+        return null
+    }
+
+    func require(name:str) Result<Node, AccessError> {
+        if self.raw_kind != 3 { return self.access_node_failure(AccessErrorKind.wrong_kind(), "key lookup requires a mapping") }
+        if value = self.get(name) { return Result<Node, AccessError>.success(value) }
+        return self.access_node_failure(AccessErrorKind.missing_key(), "missing YAML key '$(name)'")
+    }
+
+    func mapping(name:str) Result<Node, AccessError> {
+        var value = try self.require(name)
+        if value.raw_kind != 3 { return value.access_node_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a mapping") }
+        return Result<Node, AccessError>.success(value)
+    }
+
+    func sequence(name:str) Result<Node, AccessError> {
+        var value = try self.require(name)
+        if value.raw_kind != 2 { return value.access_node_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a sequence") }
+        return Result<Node, AccessError>.success(value)
+    }
+
+    func string(name:str) Result<str, AccessError> {
+        var value = try self.require(name)
+        if text = value.as_string() { return Result<str, AccessError>.success(text) }
+        return value.access_text_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a string")
+    }
+
+    func boolean(name:str) Result<bool, AccessError> {
+        var value = try self.require(name)
+        if actual = value.as_boolean() { return Result<bool, AccessError>.success(actual) }
+        return value.access_boolean_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a boolean")
+    }
+
+    func integer(name:str) Result<int, AccessError> {
+        var value = try self.require(name)
+        if actual = value.as_integer() { return Result<int, AccessError>.success(actual) }
+        return value.access_integer_failure(AccessErrorKind.invalid_scalar(), "YAML key '$(name)' is not an integer")
+    }
+
+    func set(key:Node, value:Node) Result<void, AccessError> {
+        if self.raw_kind != 3 { return self.access_failure(AccessErrorKind.wrong_kind(), "set requires a mapping") }
+        var index = 0
+        while index < self.mapping_entries.count() {
+            if equivalent_key(self.mapping_entries[index].key, key) {
+                self.mapping_entries[index].value = value
+                return Result<void, AccessError>.success()
+            }
+            index++
+        }
+        self.mapping_entries.append(Entry(key:key, value:value))
+        return Result<void, AccessError>.success()
+    }
+
+    func set(key:str, value:Node) Result<void, AccessError> {
+        return self.set(scalar_node(5, key, preferred_string_style(key)), value)
+    }
+    func set(key:str, value:str) Result<void, AccessError> {
+        return self.set(key, scalar_node(5, value, preferred_string_style(value)))
+    }
+    func set(key:str, value:int) Result<void, AccessError> { return self.set(key, scalar_node(3, "$(value)", 1)) }
+    func set(key:str, value:bool) Result<void, AccessError> {
+        if value { return self.set(key, scalar_node(2, "true", 1)) }
+        return self.set(key, scalar_node(2, "false", 1))
+    }
+
+    func remove(name:str) bool {
+        if self.raw_kind != 3 { return false }
+        var index = 0
+        while index < self.mapping_entries.count() {
+            var matches = false
+            if text = key_text(self.mapping_entries[index].key) { matches = text == name }
+            if matches {
+                let last = self.mapping_entries.count() - 1
+                while index < last {
+                    self.mapping_entries[index] = self.mapping_entries[index + 1]
+                    index++
+                }
+                self.mapping_entries.take_last()
+                return true
+            }
+            index++
+        }
+        return false
+    }
+
+    module func scalar_text_value() str { return self.text_value }
+    module func scalar_kind_code() int { return self.raw_scalar_kind }
+    module func scalar_style_code() int { return self.raw_scalar_style }
+    module func collection_style_code() int { return self.raw_collection_style }
+    module func sequence_item(index:int) Node { return self.sequence_values[index] }
+    module func mapping_key(index:int) Node { return self.mapping_entries[index].key }
+    module func mapping_value(index:int) Node { return self.mapping_entries[index].value }
+    module func initialize_scalar_style(value:int) { self.raw_scalar_style = value }
+    module func initialize_collection_style(value:int) { self.raw_collection_style = value }
+    module func initialize_sequence(values:Node[]) { self.sequence_values = values }
+    module func initialize_mapping(entries:Entry[]) { self.mapping_entries = entries }
+    module func initialize_alias(name:str) { self.alias_value = name }
+
+    private func access_failure(kind:AccessErrorKind, detail:str) Result<void, AccessError> {
+        return Result<void, AccessError>.failure(self.access_error(kind, detail))
+    }
+    private func access_node_failure(kind:AccessErrorKind, detail:str) Result<Node, AccessError> {
+        return Result<Node, AccessError>.failure(self.access_error(kind, detail))
+    }
+    private func access_text_failure(kind:AccessErrorKind, detail:str) Result<str, AccessError> {
+        return Result<str, AccessError>.failure(self.access_error(kind, detail))
+    }
+    private func access_boolean_failure(kind:AccessErrorKind, detail:str) Result<bool, AccessError> {
+        return Result<bool, AccessError>.failure(self.access_error(kind, detail))
+    }
+    private func access_integer_failure(kind:AccessErrorKind, detail:str) Result<int, AccessError> {
+        return Result<int, AccessError>.failure(self.access_error(kind, detail))
+    }
+    private func access_error(kind:AccessErrorKind, detail:str) AccessError {
+        return AccessError(kind:kind, subject:"", detail:detail, line:self.source_line, column:self.source_column)
+    }
+}
+
+public class Document {
+    private var root_value:Node?
+    private var leading_comment_values:str[]
+    private var trailing_comment_values:str[]
+    private var explicit_start_value:bool
+    private var explicit_end_value:bool
+
+    init(root:Node) {
+        self.root_value = root
+        self.leading_comment_values = []
+        self.trailing_comment_values = []
+        self.explicit_start_value = false
+        self.explicit_end_value = false
+    }
+
+    func root() Node {
+        if value = self.root_value { return value }
+        panic("YAML document has no root")
+    }
+    func set_root(value:Node) { self.root_value = value }
+    func leading_comments() str[] { return copy self.leading_comment_values }
+    func trailing_comments() str[] { return copy self.trailing_comment_values }
+    func set_leading_comments(values:str[]) { self.leading_comment_values = values }
+    func set_trailing_comments(values:str[]) { self.trailing_comment_values = values }
+    func has_explicit_start() bool { return self.explicit_start_value }
+    func has_explicit_end() bool { return self.explicit_end_value }
+    func set_explicit_start(value:bool) { self.explicit_start_value = value }
+    func set_explicit_end(value:bool) { self.explicit_end_value = value }
+}
+
+public class Stream {
+    private var document_values:Document[]
+
+    init(documents:Document[]) { self.document_values = documents }
+    func count() int { return self.document_values.count() }
+    func documents() Document[] { return copy self.document_values }
+    func document(index:int) Document { return self.document_values[index] }
+    func append(document:Document) { self.document_values.append(document) }
+}
+
+public func document() Document { return Document(mapping()) }
+public func document(root:Node) Document { return Document(root) }
+public func stream() Stream { return Stream([]) }
+
+public func null_value() Node { return scalar_node(1, "null", 1) }
+public func boolean(value:bool) Node {
+    if value { return scalar_node(2, "true", 1) }
+    return scalar_node(2, "false", 1)
+}
+public func integer(value:int) Node { return scalar_node(3, "$(value)", 1) }
+public func number_text(value:str) Result<Node, BuildError> {
+    if !valid_yaml_number(value) {
+        return Result<Node, BuildError>.failure(BuildError(kind:BuildErrorKind.invalid_number(), detail:"invalid YAML number '$(value)'"))
+    }
+    return Result<Node, BuildError>.success(scalar_node(4, value, 1))
+}
+public func string(value:str) Node { return scalar_node(5, value, preferred_string_style(value)) }
+public func sequence() Node { return collection_node(2) }
+public func sequence(values:Node[]) Node {
+    var result = collection_node(2)
+    for value in values { let ignored = result.append(value) }
+    return result
+}
+public func mapping() Node { return collection_node(3) }
+public func mapping(entries:Entry[]) Node {
+    return parsed_mapping(entries, 1, 0, 0)
+}
+public func alias(name:str) Result<Node, BuildError> {
+    if !valid_anchor_name(name) {
+        return Result<Node, BuildError>.failure(BuildError(kind:BuildErrorKind.invalid_alias(), detail:"invalid YAML alias '$(name)'"))
+    }
+    return Result<Node, BuildError>.success(parsed_alias(name, 0, 0))
+}
+
+module func parsed_scalar(kind:int, text:str, style:int, line:int, column:int) Node {
+    var result = Node(1, kind, text, line, column)
+    result.initialize_scalar_style(style)
+    return result
+}
+module func parsed_sequence(values:Node[], style:int, line:int, column:int) Node {
+    var result = Node(2, 0, "", line, column)
+    result.initialize_collection_style(style)
+    result.initialize_sequence(values)
+    return result
+}
+module func parsed_mapping(entries:Entry[], style:int, line:int, column:int) Node {
+    var result = Node(3, 0, "", line, column)
+    result.initialize_collection_style(style)
+    result.initialize_mapping(entries)
+    return result
+}
+module func parsed_alias(name:str, line:int, column:int) Node {
+    var result = Node(4, 0, "", line, column)
+    result.initialize_alias(name)
+    return result
+}
+
+func scalar_node(kind:int, text:str, style:int) Node {
+    return parsed_scalar(kind, text, style, 0, 0)
+}
+func collection_node(kind:int) Node {
+    if kind == 2 { return parsed_sequence([], 1, 0, 0) }
+    return parsed_mapping([], 1, 0, 0)
+}
+func scalar_style_code(style:ScalarStyle) int {
+    return match style { plain => 1; single_quoted => 2; double_quoted => 3; literal => 4; folded => 5 }
+}
+func collection_style_code(style:CollectionStyle) int { return match style { block => 1; flow => 2 } }
+
+func key_text(value:Node) str? {
+    if value.kind() != Kind.scalar() { return null }
+    if kind = value.scalar_kind() {
+        if kind == ScalarKind.string() { return value.as_scalar_text() }
+    }
+    return null
+}
+
+func equivalent_key(left:Node, right:Node) bool {
+    if left.kind() != right.kind() { return false }
+    if left.kind() == Kind.scalar() {
+        return left.scalar_kind_code() == right.scalar_kind_code() && left.scalar_text_value() == right.scalar_text_value()
+    }
+    return false
+}
+
+func preferred_string_style(value:str) int {
+    if value == "" { return 3 }
+    if value == "null" || value == "Null" || value == "NULL" || value == "~" { return 3 }
+    if value == "true" || value == "True" || value == "TRUE" || value == "false" || value == "False" || value == "FALSE" { return 3 }
+    let bytes = string_bytes(value)
+    if bytes.count() == 0 { return 3 }
+    if bytes[0] == 45 || bytes[0] == 63 || bytes[0] == 58 || bytes[0] == 33 || bytes[0] == 38 || bytes[0] == 42 || bytes[0] == 35 || bytes[0] == 123 || bytes[0] == 125 || bytes[0] == 91 || bytes[0] == 93 || bytes[0] == 44 || bytes[0] == 124 || bytes[0] == 62 || bytes[0] == 39 || bytes[0] == 34 || bytes[0] == 37 || bytes[0] == 64 || bytes[0] == 96 { return 3 }
+    for byte in bytes {
+        if byte == 10 || byte == 13 { return 4 }
+        if byte == 58 || byte == 35 || byte < 32 { return 3 }
+    }
+    if valid_yaml_number(value) { return 3 }
+    return 1
+}
+
+func parse_decimal_integer(value:str) int? {
+    let bytes = string_bytes(value)
+    if bytes.count() == 0 { return null }
+    var index = 0
+    var negative = false
+    if bytes[index] == 45 { negative = true; index++ }
+    elif bytes[index] == 43 { index++ }
+    if index == bytes.count() { return null }
+    var result = 0
+    while index < bytes.count() {
+        let byte = bytes[index]
+        if byte == 95 { index++; continue }
+        if byte < 48 || byte > 57 { return null }
+        let digit = (byte - 48) as int
+        if result > (9_223_372_036_854_775_807 - digit) / 10 { return null }
+        result = result * 10 + digit
+        index++
+    }
+    if negative { return -result }
+    return result
+}
+
+func valid_yaml_number(value:str) bool {
+    let bytes = string_bytes(value)
+    if bytes.count() == 0 { return false }
+    var index = 0
+    if bytes[index] == 43 || bytes[index] == 45 { index++ }
+    if index == bytes.count() { return false }
+    var digits = 0
+    var dot = false
+    var exponent = false
+    while index < bytes.count() {
+        let byte = bytes[index]
+        if byte >= 48 && byte <= 57 { digits++; index++; continue }
+        if byte == 95 { index++; continue }
+        if byte == 46 && !dot && !exponent { dot = true; index++; continue }
+        if (byte == 101 || byte == 69) && !exponent && digits > 0 {
+            exponent = true; index++
+            if index < bytes.count() && (bytes[index] == 43 || bytes[index] == 45) { index++ }
+            if index == bytes.count() { return false }
+            continue
+        }
+        return false
+    }
+    return digits > 0
+}
+
+func valid_anchor_name(value:str) bool {
+    let bytes = string_bytes(value)
+    if bytes.count() == 0 { return false }
+    for byte in bytes {
+        if byte <= 32 || byte == 44 || byte == 91 || byte == 93 || byte == 123 || byte == 125 { return false }
+    }
+    return true
+}

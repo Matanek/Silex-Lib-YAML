@@ -1,0 +1,138 @@
+use STD.Error
+use STD.Path.Path as Path
+use STD.File
+
+public use YAML.Model.Kind
+public use YAML.Model.ScalarKind
+public use YAML.Model.ScalarStyle
+public use YAML.Model.CollectionStyle
+public use YAML.Model.AccessErrorKind
+public use YAML.Model.AccessError
+public use YAML.Model.BuildErrorKind
+public use YAML.Model.BuildError
+public use YAML.Model.Entry
+public use YAML.Model.Node
+public use YAML.Model.Document
+public use YAML.Model.Stream
+public use YAML.Model.document
+public use YAML.Model.stream
+public use YAML.Model.null_value
+public use YAML.Model.boolean
+public use YAML.Model.integer
+public use YAML.Model.number_text
+public use YAML.Model.string
+public use YAML.Model.sequence
+public use YAML.Model.mapping
+public use YAML.Model.alias
+public use YAML.Parser.ParseErrorKind
+public use YAML.Parser.ParseError
+public use YAML.Parser.ParseOptions
+public use YAML.Emitter.EmitErrorKind
+public use YAML.Emitter.EmitError
+public use YAML.Emitter.EmitOptions
+
+public enum ReadError {
+    file(Error)
+    parse(ParseError)
+}
+
+public enum WriteError {
+    emit(EmitError)
+    file(Error)
+}
+
+public func parse(text:str) Result<Document, ParseError> {
+    return parse(text, YAML.Parser.default_parse_options())
+}
+
+public func parse(text:str, options:ParseOptions) Result<Document, ParseError> {
+    return YAML.Parser.parse_document(text, options)
+}
+
+public func parse_stream(text:str) Result<Stream, ParseError> {
+    return parse_stream(text, YAML.Parser.default_parse_options())
+}
+
+public func parse_stream(text:str, options:ParseOptions) Result<Stream, ParseError> {
+    return YAML.Parser.parse_documents(text, options)
+}
+
+public func read(path:Path) Result<Document, ReadError> {
+    return read(path, YAML.Parser.default_parse_options())
+}
+
+public func read(path:Path, options:ParseOptions) Result<Document, ReadError> {
+    var text = ""
+    match File.read_text(path, options.maximum_bytes) {
+        failure(error) => { return Result<Document, ReadError>.failure(ReadError.file(error)) }
+        success(value) => { text = value }
+    }
+    match parse(text, options) {
+        failure(error) => { return Result<Document, ReadError>.failure(ReadError.parse(error)) }
+        success(document) => { return Result<Document, ReadError>.success(document) }
+    }
+}
+
+public func read_stream(path:Path) Result<Stream, ReadError> {
+    return read_stream(path, YAML.Parser.default_parse_options())
+}
+
+public func read_stream(path:Path, options:ParseOptions) Result<Stream, ReadError> {
+    var text = ""
+    match File.read_text(path, options.maximum_bytes) {
+        failure(error) => { return Result<Stream, ReadError>.failure(ReadError.file(error)) }
+        success(value) => { text = value }
+    }
+    match parse_stream(text, options) {
+        failure(error) => { return Result<Stream, ReadError>.failure(ReadError.parse(error)) }
+        success(stream) => { return Result<Stream, ReadError>.success(stream) }
+    }
+}
+
+public func emit(value:Document) Result<str, EmitError> {
+    return emit(value, YAML.Emitter.default_emit_options())
+}
+
+public func emit(value:Document, options:EmitOptions) Result<str, EmitError> {
+    return YAML.Emitter.emit_document(value, options)
+}
+
+public func emit(value:Stream) Result<str, EmitError> {
+    return emit(value, YAML.Emitter.default_emit_options())
+}
+
+public func emit(value:Stream, options:EmitOptions) Result<str, EmitError> {
+    return YAML.Emitter.emit_stream(value, options)
+}
+
+public func write(path:Path, value:Document) Result<void, WriteError> {
+    return write(path, value, YAML.Emitter.default_emit_options())
+}
+
+public func write(path:Path, value:Document, options:EmitOptions) Result<void, WriteError> {
+    var text = ""
+    match emit(value, options) {
+        failure(error) => { return Result<void, WriteError>.failure(WriteError.emit(error)) }
+        success(encoded) => { text = encoded }
+    }
+    match File.write_all(path, text) {
+        failure(error) => { return Result<void, WriteError>.failure(WriteError.file(error)) }
+        success => { return Result<void, WriteError>.success() }
+    }
+}
+
+public func write(path:Path, value:Stream) Result<void, WriteError> {
+    return write(path, value, YAML.Emitter.default_emit_options())
+}
+
+public func write(path:Path, value:Stream, options:EmitOptions) Result<void, WriteError> {
+    var text = ""
+    match emit(value, options) {
+        failure(error) => { return Result<void, WriteError>.failure(WriteError.emit(error)) }
+        success(encoded) => { text = encoded }
+    }
+    match File.write_all(path, text) {
+        failure(error) => { return Result<void, WriteError>.failure(WriteError.file(error)) }
+        success => { return Result<void, WriteError>.success() }
+    }
+}

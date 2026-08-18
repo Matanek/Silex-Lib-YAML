@@ -1,0 +1,30 @@
+use Interop.C
+use STD.Text.UTF8.bytes as utf8_bytes
+
+module func string_bytes(value:str) uint8[] { return utf8_bytes(value) }
+
+module func byte_text(values:uint8[], start:int, end:int) str {
+    let view = @values[start:end]
+    return C.string(view)
+}
+
+module func trim_yaml(value:str) str {
+    let bytes = utf8_bytes(value)
+    var start = 0
+    while start < bytes.count() && (bytes[start] == 32 || bytes[start] == 9 || bytes[start] == 13) { start++ }
+    var end = bytes.count()
+    while end > start && (bytes[end - 1] == 32 || bytes[end - 1] == 9 || bytes[end - 1] == 13) { end-- }
+    return byte_text(bytes, start, end)
+}
+
+module func starts_with_bytes(value:str, expected:str) bool {
+    let bytes = utf8_bytes(value)
+    let prefix = utf8_bytes(expected)
+    if prefix.count() > bytes.count() { return false }
+    var index = 0
+    while index < prefix.count() {
+        if bytes[index] != prefix[index] { return false }
+        index++
+    }
+    return true
+}
