@@ -1,9 +1,0 @@
-use YAML
-
-func main() {
-    let source = embed_text("Defaults.yml")
-    var document = YAML.parse(source)
-    var window = document.root().mapping("window")
-    let width = window.integer("width")
-    print("Default window width: $(width)")
-}

@@ -34,8 +34,8 @@ An embedded YAML file is ordinary text and uses the same parser:
 let defaults = YAML.parse(embed_text("Config/defaults.yml"))
 ```
 
-See [ReadEmbeddedConfiguration.sx](Examples/ReadEmbeddedConfiguration.sx)
-and [EditConfiguration.sx](Examples/EditConfiguration.sx).
+See the embedded and editable configuration recipes in
+[Docs/Recipes.md](Docs/Recipes.md).
 
 ## Modify and write
 
@@ -60,7 +60,7 @@ Use `mapping`, `sequence`, `string`, `integer`, `boolean`, `null_value`,
 YAML nodes as keys through `Node.set(key, value)`; the string-key overloads are
 the ergonomic configuration path.
 
-[StoreScene.sx](Examples/StoreScene.sx) constructs and emits a minimal
+[The scene recipe](Docs/Recipes.md#storescene) constructs and emits a minimal
 scene graph. Interpretation of entity identifiers, components, assets and
 cross-references remains the engine's responsibility. YAML anchors and aliases
 remain available when the scene format intentionally uses YAML graph identity.
@@ -110,17 +110,14 @@ match YAML.try_read("application.yml") {
 distinguishes emission from file failures. Fallible construction remains
 available through `try_number_text` and `try_alias`.
 
-[RecoverInvalidConfiguration.sx](Examples/RecoverInvalidConfiguration.sx)
-shows a complete recovery path: report invalid user YAML, then continue with a
-known-good default document.
+The [recovery recipe](Docs/Recipes.md#recoverinvalidconfiguration) reports
+invalid user YAML, then continues with a known-good default document.
 
 ## Development
 
-Register the checkout, then exercise the public API through its consumer tests
-and examples:
+Register the checkout, then exercise the public API through its consumer tests:
 
 ```text
 silex link .
 silex test "$PWD/Tests"
-silex compile "$PWD/Examples/ReadEmbeddedConfiguration.sx" -o read-yaml-config
 ```

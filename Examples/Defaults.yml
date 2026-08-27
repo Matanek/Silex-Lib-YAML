@@ -1,5 +1,0 @@
-# Defaults embedded in the application binary.
-window:
-  width: 1280
-  height: 720
-  fullscreen: false
