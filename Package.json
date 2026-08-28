@@ -1,13 +1,13 @@
 {
   "name": "YAML",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": {
     "en": "Read, create, modify, and write human-authored YAML documents.",
     "fr": "Lit, crée, modifie et écrit des documents YAML rédigés manuellement."
   },
   "authors": ["Matanek"],
   "requires": {
-    "silex": ">=0.42.0"
+    "silex": ">=0.43.0"
   },
   "dependencies": {
     "STD": "^0.16.5"
