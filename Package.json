@@ -1,6 +1,6 @@
 {
   "name": "YAML",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": {
     "en": "Read, create, modify, and write human-authored YAML documents.",
     "fr": "Lit, crée, modifie et écrit des documents YAML rédigés manuellement."
