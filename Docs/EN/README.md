@@ -19,7 +19,8 @@ Then import its public module:
 use YAML
 ```
 
-YAML requires Silex 0.39.0 or newer.
+This development revision requires the toolchain that distinguishes ordinary
+calls from `try` capture for `Result` operations.
 
 ## Read a first configuration
 
@@ -49,7 +50,7 @@ Use `YAML.read("application.yml")` when the source is a local file. A file
 embedded in the executable remains ordinary text and uses the same parser:
 
 ```sx
-let defaults = YAML.parse(embed_text("Config/defaults.yml"))
+var defaults = YAML.parse(embed_text("Config/defaults.yml"))
 ```
 
 Asset paths are relative to the `.sx` file that references them. The
@@ -105,7 +106,7 @@ let options = YAML.ParseOptions(
     maximum_aliases:10000,
 )
 
-let world = YAML.read("Scenes/world.yml", options)
+var world = YAML.read("Scenes/world.yml", options)
 ```
 
 Ordinary calls do not need to construct these options: `read(path)` and
@@ -118,9 +119,12 @@ Direct operations stop with a precise diagnostic when a key is missing, a node
 or scalar has the wrong kind, a document is invalid, or a file is inaccessible.
 They never silently coerce an unexpected value into an application setting.
 
-An application that needs to continue can use `try_parse`, `try_parse_stream`,
-`try_read`, `try_read_stream`, `try_emit`, `try_write`, and the node operations
-prefixed with `try_`. `ReadError` distinguishes file errors from parse errors;
+Each operation has one name and one `Result` declaration. An ordinary call
+returns the expected value or stops the program on failure. Add `try` to keep
+the result and handle the error: `var result = try YAML.parse(text)`, then
+`match result`. Node operations follow the same model.
+
+`ReadError` distinguishes file errors from parse errors;
 `WriteError` distinguishes emission errors from file errors.
 
 The [recovery recipe](Recipes/Recover-invalid-configuration.md) reports an

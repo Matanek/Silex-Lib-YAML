@@ -13,7 +13,7 @@ func defaults() YAML.Document {
 func main() {
     let user_source = "window:\n\twidth: 1920\n"
 
-    match YAML.try_parse(user_source) {
+    match (try YAML.parse(user_source)) {
         success(configuration) => { print(YAML.emit(configuration)) }
         failure(error) => {
             print("Ignoring invalid configuration at $(error.line):$(error.column): $(error.detail)")
@@ -32,9 +32,9 @@ window:
   fullscreen: false
 ```
 
-`try_parse` returns a `Result<Document, ParseError>` instead of stopping the
+`try YAML.parse(...)` keeps a `Result<Document, ParseError>` instead of stopping the
 program. `ParseError` provides a category, byte offset, line, column, and
-readable detail. The same model is available for files with `try_read`, for
-emission with `try_emit`, and for writing with `try_write`.
+readable detail. The same model is available for files with `read`, for
+emission with `emit`, and for writing with `write`.
 
 [Return to the YAML documentation](../README.md)

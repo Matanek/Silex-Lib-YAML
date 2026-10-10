@@ -68,7 +68,7 @@ package func parse_document(text:str, options:ParseOptions) Result<Document, Par
         return Result<Document, ParseError>.failure(ParseError(kind:ParseErrorKind.input_limit(), byte_offset:0, line:1, column:1, detail:"YAML input exceeds the configured byte limit"))
     }
     var parser = BlockParser(text, options)
-    return parser.document()
+    return (try parser.document())
 }
 
 package func parse_documents(text:str, options:ParseOptions) Result<Stream, ParseError> {
@@ -79,7 +79,7 @@ package func parse_documents(text:str, options:ParseOptions) Result<Stream, Pars
         return Result<Stream, ParseError>.failure(ParseError(kind:ParseErrorKind.input_limit(), byte_offset:0, line:1, column:1, detail:"YAML input exceeds the configured byte limit"))
     }
     var parser = BlockParser(text, options)
-    return parser.stream()
+    return (try parser.stream())
 }
 
 class BlockParser {
@@ -105,10 +105,10 @@ class BlockParser {
             self.take_comments(leading)
         }
         if self.index >= self.lines.count() || self.lines[self.index].content == "..." {
-            return self.document_failure(ParseErrorKind.empty_document(), "YAML document has no root value")
+            return (try self.document_failure(ParseErrorKind.empty_document(), "YAML document has no root value"))
         }
         var root:Node?
-        match self.block(self.lines[self.index].indent, 0) {
+        match (try self.block(self.lines[self.index].indent, 0)) {
             failure(error) => { return Result<Document, ParseError>.failure(error) }
             success(value) => { root = value }
         }
@@ -123,7 +123,7 @@ class BlockParser {
             self.take_comments(trailing)
         }
         if self.index < self.lines.count() {
-            return self.document_failure(ParseErrorKind.trailing_data(), "multiple YAML documents require parse_stream")
+            return (try self.document_failure(ParseErrorKind.trailing_data(), "multiple YAML documents require parse_stream"))
         }
         var result = Document(root_value)
         result.set_leading_comments(leading)
@@ -131,7 +131,7 @@ class BlockParser {
         result.set_explicit_start(explicit_start)
         result.set_explicit_end(explicit_end)
         var anchors:str[] = []
-        match validate_references(root_value, anchors) {
+        match (try validate_references(root_value, anchors)) {
             failure(error) => { return Result<Document, ParseError>.failure(error) }
             success => {}
         }
@@ -145,7 +145,7 @@ class BlockParser {
             self.take_comments(leading)
             if self.index >= self.lines.count() { break }
             if result.count() >= self.options.maximum_documents {
-                return self.stream_failure(ParseErrorKind.document_limit(), "YAML stream exceeds the configured document limit")
+                return (try self.stream_failure(ParseErrorKind.document_limit(), "YAML stream exceeds the configured document limit"))
             }
             var explicit_start = false
             if self.lines[self.index].content == "---" {
@@ -153,13 +153,13 @@ class BlockParser {
                 self.index++
                 self.take_comments(leading)
             } elif result.count() > 0 {
-                return self.stream_failure(ParseErrorKind.unexpected_token(), "a YAML stream document after the first requires '---'")
+                return (try self.stream_failure(ParseErrorKind.unexpected_token(), "a YAML stream document after the first requires '---'"))
             }
             if self.index >= self.lines.count() || self.lines[self.index].content == "..." {
-                return self.stream_failure(ParseErrorKind.empty_document(), "YAML document has no root value")
+                return (try self.stream_failure(ParseErrorKind.empty_document(), "YAML document has no root value"))
             }
             var root = parsed_scalar(1, "null", 1, 0, 0)
-            match self.block(self.lines[self.index].indent, 0) {
+            match (try self.block(self.lines[self.index].indent, 0)) {
                 failure(error) => { return Result<Stream, ParseError>.failure(error) }
                 success(value) => { root = value }
             }
@@ -176,42 +176,42 @@ class BlockParser {
             document.set_explicit_start(explicit_start)
             document.set_explicit_end(explicit_end)
             var anchors:str[] = []
-            match validate_references(root, anchors) {
+            match (try validate_references(root, anchors)) {
                 failure(error) => { return Result<Stream, ParseError>.failure(error) }
                 success => {}
             }
             result.append(document)
         }
-        if result.count() == 0 { return self.stream_failure(ParseErrorKind.empty_document(), "YAML stream has no document") }
+        if result.count() == 0 { return (try self.stream_failure(ParseErrorKind.empty_document(), "YAML stream has no document")) }
         return Result<Stream, ParseError>.success(result)
     }
 
     private func block(indent:int, depth:int) Result<Node, ParseError> {
         if depth >= self.options.maximum_depth {
-            return self.node_failure(ParseErrorKind.depth_limit(), "YAML nesting exceeds the configured depth")
+            return (try self.node_failure(ParseErrorKind.depth_limit(), "YAML nesting exceeds the configured depth"))
         }
         var comments:str[] = []
         self.take_comments(comments)
-        if self.index >= self.lines.count() { return self.node_failure(ParseErrorKind.unexpected_token(), "expected a YAML value") }
+        if self.index >= self.lines.count() { return (try self.node_failure(ParseErrorKind.unexpected_token(), "expected a YAML value")) }
         let line = self.lines[self.index]
-        if tab_indented(line) { return self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs") }
-        if line.indent < indent { return self.node_failure(ParseErrorKind.invalid_indentation(), "expected an indented YAML value") }
+        if tab_indented(line) { return (try self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs")) }
+        if line.indent < indent { return (try self.node_failure(ParseErrorKind.invalid_indentation(), "expected an indented YAML value")) }
         var result = parsed_scalar(1, "null", 1, line.number, line.indent + 1)
         if sequence_marker(line.content) {
-            match self.block_sequence(line.indent, depth + 1) {
+            match (try self.block_sequence(line.indent, depth + 1)) {
                 failure(error) => { return Result<Node, ParseError>.failure(error) }
                 success(value) => { result = value }
             }
         }
         elif mapping_separator(line.content) >= 0 {
-            match self.block_mapping(line.indent, depth + 1) {
+            match (try self.block_mapping(line.indent, depth + 1)) {
                 failure(error) => { return Result<Node, ParseError>.failure(error) }
                 success(value) => { result = value }
             }
         }
         else {
             self.index++
-            match self.inline_value(line.content, line.number, line.indent + 1, depth + 1) {
+            match (try self.inline_value(line.content, line.number, line.indent + 1, depth + 1)) {
                 failure(error) => { return Result<Node, ParseError>.failure(error) }
                 success(value) => { result = value }
             }
@@ -229,31 +229,31 @@ class BlockParser {
             self.take_comments(comments)
             if self.index >= self.lines.count() { break }
             let line = self.lines[self.index]
-            if tab_indented(line) { return self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs") }
+            if tab_indented(line) { return (try self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs")) }
             if line.indent != indent || !sequence_marker(line.content) { break }
             let rest = sequence_rest(line.content)
             self.index++
             var value = parsed_scalar(1, "null", 1, line.number, line.indent + 1)
             if rest == "" {
                 if self.index < self.lines.count() && self.lines[self.index].indent > indent {
-                    match self.block(self.lines[self.index].indent, depth) {
+                    match (try self.block(self.lines[self.index].indent, depth)) {
                         failure(error) => { return Result<Node, ParseError>.failure(error) }
                         success(parsed) => { value = parsed }
                     }
                 } else { value = parsed_scalar(1, "null", 1, line.number, line.indent + 1) }
             } elif metadata_only(rest) && self.index < self.lines.count() && self.lines[self.index].indent > indent {
-                match self.block(self.lines[self.index].indent, depth) {
+                match (try self.block(self.lines[self.index].indent, depth)) {
                     failure(error) => { return Result<Node, ParseError>.failure(error) }
                     success(parsed) => { value = parsed }
                 }
                 apply_metadata(rest, value)
             } elif mapping_separator(rest) >= 0 {
-                match self.sequence_mapping(rest, line, indent, depth) {
+                match (try self.sequence_mapping(rest, line, indent, depth)) {
                     failure(error) => { return Result<Node, ParseError>.failure(error) }
                     success(parsed) => { value = parsed }
                 }
             } else {
-                match self.inline_value(rest, line.number, line.indent + 3, depth) {
+                match (try self.inline_value(rest, line.number, line.indent + 3, depth)) {
                     failure(error) => { return Result<Node, ParseError>.failure(error) }
                     success(parsed) => { value = parsed }
                 }
@@ -269,7 +269,7 @@ class BlockParser {
         var entries:Entry[] = []
         var empty = parsed_scalar(1, "null", 1, source.number, source.indent + 3)
         var first_entry = Entry(key:empty, value:empty)
-        match self.mapping_entry(first, source.number, source.indent + 3, sequence_indent + 2, depth) {
+        match (try self.mapping_entry(first, source.number, source.indent + 3, sequence_indent + 2, depth)) {
             failure(error) => { return Result<Node, ParseError>.failure(error) }
             success(value) => { first_entry = value }
         }
@@ -280,12 +280,12 @@ class BlockParser {
             self.take_comments(comments)
             if self.index >= self.lines.count() { break }
             let line = self.lines[self.index]
-            if tab_indented(line) { return self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs") }
+            if tab_indented(line) { return (try self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs")) }
             if line.indent != mapping_indent || mapping_separator(line.content) < 0 { break }
             self.index++
             var placeholder = parsed_scalar(1, "null", 1, line.number, line.indent + 1)
             var entry = Entry(key:placeholder, value:placeholder)
-            match self.mapping_entry(line.content, line.number, line.indent + 1, mapping_indent, depth) {
+            match (try self.mapping_entry(line.content, line.number, line.indent + 1, mapping_indent, depth)) {
                 failure(error) => { return Result<Node, ParseError>.failure(error) }
                 success(value) => { entry = value }
             }
@@ -304,13 +304,13 @@ class BlockParser {
             self.take_comments(comments)
             if self.index >= self.lines.count() { break }
             let line = self.lines[self.index]
-            if tab_indented(line) { return self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs") }
+            if tab_indented(line) { return (try self.node_failure(ParseErrorKind.invalid_indentation(), "YAML indentation cannot use tabs")) }
             if line.indent != indent || sequence_marker(line.content) { break }
             if mapping_separator(line.content) < 0 { break }
             self.index++
             var placeholder = parsed_scalar(1, "null", 1, line.number, line.indent + 1)
             var entry = Entry(key:placeholder, value:placeholder)
-            match self.mapping_entry(line.content, line.number, line.indent + 1, indent, depth) {
+            match (try self.mapping_entry(line.content, line.number, line.indent + 1, indent, depth)) {
                 failure(error) => { return Result<Node, ParseError>.failure(error) }
                 success(value) => { entry = value }
             }
@@ -323,26 +323,26 @@ class BlockParser {
 
     private func mapping_entry(content:str, line:int, column:int, indent:int, depth:int) Result<Entry, ParseError> {
         let separator = mapping_separator(content)
-        if separator < 0 { return self.entry_failure(ParseErrorKind.invalid_mapping(), "expected ':' in YAML mapping") }
+        if separator < 0 { return (try self.entry_failure(ParseErrorKind.invalid_mapping(), "expected ':' in YAML mapping")) }
         let bytes = utf8_bytes(content)
         let key_text = trim_yaml(byte_text(bytes, 0, separator))
-        if key_text == "" { return self.entry_failure(ParseErrorKind.invalid_mapping(), "empty mapping keys require the explicit '?' form") }
+        if key_text == "" { return (try self.entry_failure(ParseErrorKind.invalid_mapping(), "empty mapping keys require the explicit '?' form")) }
         let value_text = trim_yaml(byte_text(bytes, separator + 1, bytes.count()))
         var key = parsed_scalar(1, "null", 1, line, column)
-        match self.inline_value(key_text, line, column, depth) {
+        match (try self.inline_value(key_text, line, column, depth)) {
             failure(error) => { return Result<Entry, ParseError>.failure(error) }
             success(value) => { key = value }
         }
         var value = parsed_scalar(1, "null", 1, line, column + separator + 1)
         if value_text == "" {
             if self.index < self.lines.count() && self.lines[self.index].indent > indent {
-                match self.block(self.lines[self.index].indent, depth) {
+                match (try self.block(self.lines[self.index].indent, depth)) {
                     failure(error) => { return Result<Entry, ParseError>.failure(error) }
                     success(parsed) => { value = parsed }
                 }
             } else { value = parsed_scalar(1, "null", 1, line, column + separator + 1) }
         } elif metadata_only(value_text) && self.index < self.lines.count() && self.lines[self.index].indent > indent {
-            match self.block(self.lines[self.index].indent, depth) {
+            match (try self.block(self.lines[self.index].indent, depth)) {
                 failure(error) => { return Result<Entry, ParseError>.failure(error) }
                 success(parsed) => { value = parsed }
             }
@@ -350,7 +350,7 @@ class BlockParser {
         } elif value_text == "|" || value_text == ">" || starts_with_bytes(value_text, "|-") || starts_with_bytes(value_text, "|+") || starts_with_bytes(value_text, ">-") || starts_with_bytes(value_text, ">+") {
             value = self.block_scalar(value_text, line, indent)
         } else {
-            match self.inline_value(value_text, line, column + separator + 1, depth) {
+            match (try self.inline_value(value_text, line, column + separator + 1, depth)) {
                 failure(error) => { return Result<Entry, ParseError>.failure(error) }
                 success(parsed) => { value = parsed }
             }
@@ -388,14 +388,14 @@ class BlockParser {
     private func inline_value(text:str, line:int, column:int, depth:int) Result<Node, ParseError> {
         var parser = InlineParser(text, line, column, depth, self.options.maximum_depth)
         var value = parsed_scalar(1, "null", 1, line, column)
-        match parser.run() {
+        match (try parser.run()) {
             failure(error) => { return Result<Node, ParseError>.failure(error) }
             success(parsed) => { value = parsed }
         }
         if value.kind() == YAML.Model.Kind.alias() {
             self.aliases++
             if self.aliases > self.options.maximum_aliases {
-                return self.node_failure(ParseErrorKind.invalid_alias(), "YAML aliases exceed the configured limit")
+                return (try self.node_failure(ParseErrorKind.invalid_alias(), "YAML aliases exceed the configured limit"))
             }
         }
         return Result<Node, ParseError>.success(value)
@@ -443,17 +443,17 @@ class InlineParser {
     func run() Result<Node, ParseError> {
         self.space()
         var value = parsed_scalar(1, "null", 1, self.line, self.base_column)
-        match self.value(self.depth, false) {
+        match (try self.value(self.depth, false)) {
             failure(error) => { return Result<Node, ParseError>.failure(error) }
             success(parsed) => { value = parsed }
         }
         self.space()
-        if self.offset != self.bytes.count() { return self.failure(ParseErrorKind.trailing_data(), "unexpected trailing YAML content") }
+        if self.offset != self.bytes.count() { return (try self.failure(ParseErrorKind.trailing_data(), "unexpected trailing YAML content")) }
         return Result<Node, ParseError>.success(value)
     }
 
     private func value(depth:int, mapping_key:bool) Result<Node, ParseError> {
-        if depth >= self.maximum_depth { return self.failure(ParseErrorKind.depth_limit(), "YAML nesting exceeds the configured depth") }
+        if depth >= self.maximum_depth { return (try self.failure(ParseErrorKind.depth_limit(), "YAML nesting exceeds the configured depth")) }
         self.space()
         var tag:str?
         var anchor:str?
@@ -461,29 +461,29 @@ class InlineParser {
             let marker = self.bytes[self.offset]
             self.offset++
             let name = self.name()
-            if name == "" { return self.failure(ParseErrorKind.invalid_anchor(), "tag or anchor name is empty") }
+            if name == "" { return (try self.failure(ParseErrorKind.invalid_anchor(), "tag or anchor name is empty")) }
             if marker == 33 { tag = name } else { anchor = name }
             self.space()
         }
-        if self.offset >= self.bytes.count() { return self.failure(ParseErrorKind.unexpected_token(), "expected a YAML value") }
+        if self.offset >= self.bytes.count() { return (try self.failure(ParseErrorKind.unexpected_token(), "expected a YAML value")) }
         var result = parsed_scalar(1, "null", 1, self.line, self.base_column + self.offset)
         let byte = self.bytes[self.offset]
         if byte == 91 {
-            match self.flow_sequence(depth + 1) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
+            match (try self.flow_sequence(depth + 1)) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
         }
         elif byte == 123 {
-            match self.flow_mapping(depth + 1) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
+            match (try self.flow_mapping(depth + 1)) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
         }
         elif byte == 34 {
-            match self.double_quoted() { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
+            match (try self.double_quoted()) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
         }
         elif byte == 39 {
-            match self.single_quoted() { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
+            match (try self.single_quoted()) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(value) => { result = value } }
         }
         elif byte == 42 {
             self.offset++
             let alias_name = self.name()
-            if !valid_anchor_name(alias_name) { return self.failure(ParseErrorKind.invalid_alias(), "invalid YAML alias") }
+            if !valid_anchor_name(alias_name) { return (try self.failure(ParseErrorKind.invalid_alias(), "invalid YAML alias")) }
             result = parsed_alias(alias_name, self.line, self.base_column + self.offset)
         } else { result = self.plain(mapping_key) }
         if tag != null { result.set_tag(tag) }
@@ -499,11 +499,11 @@ class InlineParser {
         if self.take(93) { return Result<Node, ParseError>.success(parsed_sequence(values, 2, self.line, column)) }
         while true {
             var value = parsed_scalar(1, "null", 1, self.line, self.base_column + self.offset)
-            match self.value(depth, false) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(parsed) => { value = parsed } }
+            match (try self.value(depth, false)) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(parsed) => { value = parsed } }
             values.append(value)
             self.space()
             if self.take(93) { break }
-            if !self.take(44) { return self.failure(ParseErrorKind.invalid_sequence(), "expected ',' or ']' in flow sequence") }
+            if !self.take(44) { return (try self.failure(ParseErrorKind.invalid_sequence(), "expected ',' or ']' in flow sequence")) }
             self.space()
         }
         return Result<Node, ParseError>.success(parsed_sequence(values, 2, self.line, column))
@@ -517,15 +517,15 @@ class InlineParser {
         if self.take(125) { return Result<Node, ParseError>.success(parsed_mapping(entries, 2, self.line, column)) }
         while true {
             var key = parsed_scalar(1, "null", 1, self.line, self.base_column + self.offset)
-            match self.value(depth, true) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(parsed) => { key = parsed } }
+            match (try self.value(depth, true)) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(parsed) => { key = parsed } }
             self.space()
-            if !self.take(58) { return self.failure(ParseErrorKind.invalid_mapping(), "expected ':' in flow mapping") }
+            if !self.take(58) { return (try self.failure(ParseErrorKind.invalid_mapping(), "expected ':' in flow mapping")) }
             var value = parsed_scalar(1, "null", 1, self.line, self.base_column + self.offset)
-            match self.value(depth, false) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(parsed) => { value = parsed } }
+            match (try self.value(depth, false)) { failure(error) => { return Result<Node, ParseError>.failure(error) }; success(parsed) => { value = parsed } }
             entries.append(Entry(key:key, value:value))
             self.space()
             if self.take(125) { break }
-            if !self.take(44) { return self.failure(ParseErrorKind.invalid_mapping(), "expected ',' or '}' in flow mapping") }
+            if !self.take(44) { return (try self.failure(ParseErrorKind.invalid_mapping(), "expected ',' or '}' in flow mapping")) }
             self.space()
         }
         return Result<Node, ParseError>.success(parsed_mapping(entries, 2, self.line, column))
@@ -545,7 +545,7 @@ class InlineParser {
             }
             output.append(byte)
         }
-        return self.failure(ParseErrorKind.invalid_scalar(), "unterminated single-quoted scalar")
+        return (try self.failure(ParseErrorKind.invalid_scalar(), "unterminated single-quoted scalar"))
     }
 
     private func double_quoted() Result<Node, ParseError> {
@@ -558,7 +558,7 @@ class InlineParser {
                 return Result<Node, ParseError>.success(parsed_scalar(5, C.string(@output[0:output.count()]), 3, self.line, self.base_column))
             }
             if byte == 92 {
-                if self.offset >= self.bytes.count() { return self.failure(ParseErrorKind.invalid_escape(), "unterminated YAML escape") }
+                if self.offset >= self.bytes.count() { return (try self.failure(ParseErrorKind.invalid_escape(), "unterminated YAML escape")) }
                 let escaped = self.bytes[self.offset]
                 self.offset++
                 if escaped == 110 { output.append(10 as uint8) }
@@ -577,25 +577,25 @@ class InlineParser {
                     var count = 2
                     if escaped == 117 { count = 4 }
                     elif escaped == 85 { count = 8 }
-                    if self.offset + count > self.bytes.count() { return self.failure(ParseErrorKind.invalid_escape(), "incomplete hexadecimal YAML escape") }
+                    if self.offset + count > self.bytes.count() { return (try self.failure(ParseErrorKind.invalid_escape(), "incomplete hexadecimal YAML escape")) }
                     var scalar = 0
                     var index = 0
                     while index < count {
                         let digit = hexadecimal(self.bytes[self.offset + index])
-                        if digit < 0 { return self.failure(ParseErrorKind.invalid_escape(), "invalid hexadecimal YAML escape") }
+                        if digit < 0 { return (try self.failure(ParseErrorKind.invalid_escape(), "invalid hexadecimal YAML escape")) }
                         scalar = scalar * 16 + digit
                         index++
                     }
                     self.offset += count
                     if scalar > 0x10ffff || (scalar >= 0xd800 && scalar <= 0xdfff) {
-                        return self.failure(ParseErrorKind.invalid_escape(), "invalid Unicode scalar in YAML escape")
+                        return (try self.failure(ParseErrorKind.invalid_escape(), "invalid Unicode scalar in YAML escape"))
                     }
                     append_unicode(output, scalar)
                 }
-                else { return self.failure(ParseErrorKind.invalid_escape(), "unsupported YAML escape") }
+                else { return (try self.failure(ParseErrorKind.invalid_escape(), "unsupported YAML escape")) }
             } else { output.append(byte) }
         }
-        return self.failure(ParseErrorKind.invalid_scalar(), "unterminated double-quoted scalar")
+        return (try self.failure(ParseErrorKind.invalid_scalar(), "unterminated double-quoted scalar"))
     }
 
     private func plain(mapping_key:bool) Node {
@@ -845,7 +845,7 @@ func validate_references(value:Node, anchors:&str[]) Result<void, ParseError> {
         var index = 0
         while index < value.count() {
             var child = value.sequence_item(index)
-            match validate_references(child, anchors) {
+            match (try validate_references(child, anchors)) {
                 failure(error) => { return Result<void, ParseError>.failure(error) }
                 success => {}
             }
@@ -855,12 +855,12 @@ func validate_references(value:Node, anchors:&str[]) Result<void, ParseError> {
         var index = 0
         while index < value.count() {
             var key = value.mapping_key(index)
-            match validate_references(key, anchors) {
+            match (try validate_references(key, anchors)) {
                 failure(error) => { return Result<void, ParseError>.failure(error) }
                 success => {}
             }
             var entry_value = value.mapping_value(index)
-            match validate_references(entry_value, anchors) {
+            match (try validate_references(entry_value, anchors)) {
                 failure(error) => { return Result<void, ParseError>.failure(error) }
                 success => {}
             }

@@ -136,15 +136,15 @@ public class Node {
     func set_leading_comments(values:str[]) { self.leading_comment_values = values }
     func set_inline_comment(value:str?) { self.inline_comment_value = value }
 
-    func try_set_scalar_style(style:ScalarStyle) Result<void, AccessError> {
-        if self.raw_kind != 1 { return self.access_failure(AccessErrorKind.wrong_kind(), "scalar style requires a scalar") }
+    func set_scalar_style(style:ScalarStyle) Result<void, AccessError> {
+        if self.raw_kind != 1 { return (try self.access_failure(AccessErrorKind.wrong_kind(), "scalar style requires a scalar")) }
         self.raw_scalar_style = scalar_style_code(style)
         return Result<void, AccessError>.success()
     }
 
-    func try_set_collection_style(style:CollectionStyle) Result<void, AccessError> {
+    func set_collection_style(style:CollectionStyle) Result<void, AccessError> {
         if self.raw_kind != 2 && self.raw_kind != 3 {
-            return self.access_failure(AccessErrorKind.wrong_kind(), "collection style requires a sequence or mapping")
+            return (try self.access_failure(AccessErrorKind.wrong_kind(), "collection style requires a sequence or mapping"))
         }
         self.raw_collection_style = collection_style_code(style)
         return Result<void, AccessError>.success()
@@ -193,16 +193,16 @@ public class Node {
         return 0
     }
 
-    func try_at(index:int) Result<Node, AccessError> {
-        if self.raw_kind != 2 { return self.access_node_failure(AccessErrorKind.wrong_kind(), "node is not a sequence") }
+    func at(index:int) Result<Node, AccessError> {
+        if self.raw_kind != 2 { return (try self.access_node_failure(AccessErrorKind.wrong_kind(), "node is not a sequence")) }
         if index < 0 || index >= self.sequence_values.count() {
-            return self.access_node_failure(AccessErrorKind.index_out_of_bounds(), "sequence index is outside its bounds")
+            return (try self.access_node_failure(AccessErrorKind.index_out_of_bounds(), "sequence index is outside its bounds"))
         }
         return Result<Node, AccessError>.success(self.sequence_values[index])
     }
 
-    func try_append(value:Node) Result<void, AccessError> {
-        if self.raw_kind != 2 { return self.access_failure(AccessErrorKind.wrong_kind(), "append requires a sequence") }
+    func append(value:Node) Result<void, AccessError> {
+        if self.raw_kind != 2 { return (try self.access_failure(AccessErrorKind.wrong_kind(), "append requires a sequence")) }
         self.sequence_values.append(value)
         return Result<void, AccessError>.success()
     }
@@ -217,44 +217,44 @@ public class Node {
         return null
     }
 
-    func try_require(name:str) Result<Node, AccessError> {
-        if self.raw_kind != 3 { return self.access_node_failure(AccessErrorKind.wrong_kind(), "key lookup requires a mapping") }
+    func require(name:str) Result<Node, AccessError> {
+        if self.raw_kind != 3 { return (try self.access_node_failure(AccessErrorKind.wrong_kind(), "key lookup requires a mapping")) }
         if value = self.get(name) { return Result<Node, AccessError>.success(value) }
-        return self.access_node_failure(AccessErrorKind.missing_key(), "missing YAML key '$(name)'")
+        return (try self.access_node_failure(AccessErrorKind.missing_key(), "missing YAML key '$(name)'"))
     }
 
-    func try_mapping(name:str) Result<Node, AccessError> {
-        var value = try self.try_require(name)
-        if value.raw_kind != 3 { return value.access_node_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a mapping") }
+    func mapping(name:str) Result<Node, AccessError> {
+        var value = try self.require(name) else error { return Result<Node,AccessError>.failure(error) }
+        if value.raw_kind != 3 { return (try value.access_node_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a mapping")) }
         return Result<Node, AccessError>.success(value)
     }
 
-    func try_sequence(name:str) Result<Node, AccessError> {
-        var value = try self.try_require(name)
-        if value.raw_kind != 2 { return value.access_node_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a sequence") }
+    func sequence(name:str) Result<Node, AccessError> {
+        var value = try self.require(name) else error { return Result<Node,AccessError>.failure(error) }
+        if value.raw_kind != 2 { return (try value.access_node_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a sequence")) }
         return Result<Node, AccessError>.success(value)
     }
 
-    func try_string(name:str) Result<str, AccessError> {
-        var value = try self.try_require(name)
+    func string(name:str) Result<str, AccessError> {
+        var value = try self.require(name) else error { return Result<str,AccessError>.failure(error) }
         if text = value.as_string() { return Result<str, AccessError>.success(text) }
-        return value.access_text_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a string")
+        return (try value.access_text_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a string"))
     }
 
-    func try_boolean(name:str) Result<bool, AccessError> {
-        var value = try self.try_require(name)
+    func boolean(name:str) Result<bool, AccessError> {
+        var value = try self.require(name) else error { return Result<bool,AccessError>.failure(error) }
         if actual = value.as_boolean() { return Result<bool, AccessError>.success(actual) }
-        return value.access_boolean_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a boolean")
+        return (try value.access_boolean_failure(AccessErrorKind.wrong_kind(), "YAML key '$(name)' is not a boolean"))
     }
 
-    func try_integer(name:str) Result<int, AccessError> {
-        var value = try self.try_require(name)
+    func integer(name:str) Result<int, AccessError> {
+        var value = try self.require(name) else error { return Result<int,AccessError>.failure(error) }
         if actual = value.as_integer() { return Result<int, AccessError>.success(actual) }
-        return value.access_integer_failure(AccessErrorKind.invalid_scalar(), "YAML key '$(name)' is not an integer")
+        return (try value.access_integer_failure(AccessErrorKind.invalid_scalar(), "YAML key '$(name)' is not an integer"))
     }
 
-    func try_set(key:Node, value:Node) Result<void, AccessError> {
-        if self.raw_kind != 3 { return self.access_failure(AccessErrorKind.wrong_kind(), "set requires a mapping") }
+    func set(key:Node, value:Node) Result<void, AccessError> {
+        if self.raw_kind != 3 { return (try self.access_failure(AccessErrorKind.wrong_kind(), "set requires a mapping")) }
         var index = 0
         while index < self.mapping_entries.count() {
             if equivalent_key(self.mapping_entries[index].key, key) {
@@ -267,89 +267,18 @@ public class Node {
         return Result<void, AccessError>.success()
     }
 
-    func try_set(key:str, value:Node) Result<void, AccessError> {
-        return self.try_set(scalar_node(5, key, preferred_string_style(key)), value)
+    func set(key:str, value:Node) Result<void, AccessError> {
+        return (try self.set(scalar_node(5, key, preferred_string_style(key)), value))
     }
-    func try_set(key:str, value:str) Result<void, AccessError> {
-        return self.try_set(key, scalar_node(5, value, preferred_string_style(value)))
+    func set(key:str, value:str) Result<void, AccessError> {
+        return (try self.set(key, scalar_node(5, value, preferred_string_style(value))))
     }
-    func try_set(key:str, value:int) Result<void, AccessError> { return self.try_set(key, scalar_node(3, "$(value)", 1)) }
-    func try_set(key:str, value:bool) Result<void, AccessError> {
-        if value { return self.try_set(key, scalar_node(2, "true", 1)) }
-        return self.try_set(key, scalar_node(2, "false", 1))
-    }
-
-    func set_scalar_style(style:ScalarStyle) {
-        match self.try_set_scalar_style(style) { failure(error) => { panic(error.detail) }; success => {} }
+    func set(key:str, value:int) Result<void, AccessError> { return (try self.set(key, scalar_node(3, "$(value)", 1))) }
+    func set(key:str, value:bool) Result<void, AccessError> {
+        if value { return (try self.set(key, scalar_node(2, "true", 1))) }
+        return (try self.set(key, scalar_node(2, "false", 1)))
     }
 
-    func set_collection_style(style:CollectionStyle) {
-        match self.try_set_collection_style(style) { failure(error) => { panic(error.detail) }; success => {} }
-    }
-
-    func at(index:int) Node {
-        match self.try_at(index) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func append(value:Node) {
-        match self.try_append(value) { failure(error) => { panic(error.detail) }; success => {} }
-    }
-
-    func require(name:str) Node {
-        match self.try_require(name) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func mapping(name:str) Node {
-        match self.try_mapping(name) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func sequence(name:str) Node {
-        match self.try_sequence(name) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func string(name:str) str {
-        match self.try_string(name) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func boolean(name:str) bool {
-        match self.try_boolean(name) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func integer(name:str) int {
-        match self.try_integer(name) {
-            failure(error) => { panic(error.detail) }
-            success(value) => { return value }
-        }
-    }
-
-    func set(key:Node, value:Node) {
-        match self.try_set(key, value) { failure(error) => { panic(error.detail) }; success => {} }
-    }
-    func set(key:str, value:Node) { self.set(scalar_node(5, key, preferred_string_style(key)), value) }
-    func set(key:str, value:str) { self.set(key, scalar_node(5, value, preferred_string_style(value))) }
-    func set(key:str, value:int) { self.set(key, scalar_node(3, "$(value)", 1)) }
-    func set(key:str, value:bool) {
-        if value { self.set(key, scalar_node(2, "true", 1)); return }
-        self.set(key, scalar_node(2, "false", 1))
-    }
 
     func remove(name:str) bool {
         if self.raw_kind != 3 { return false }
@@ -454,7 +383,7 @@ public func boolean(value:bool) Node {
     return scalar_node(2, "false", 1)
 }
 public func integer(value:int) Node { return scalar_node(3, "$(value)", 1) }
-public func try_number_text(value:str) Result<Node, BuildError> {
+public func number_text(value:str) Result<Node, BuildError> {
     if !valid_yaml_number(value) {
         return Result<Node, BuildError>.failure(BuildError(kind:BuildErrorKind.invalid_number(), detail:"invalid YAML number '$(value)'"))
     }
@@ -471,26 +400,13 @@ public func mapping() Node { return collection_node(3) }
 public func mapping(entries:Entry[]) Node {
     return parsed_mapping(entries, 1, 0, 0)
 }
-public func try_alias(name:str) Result<Node, BuildError> {
+public func alias(name:str) Result<Node, BuildError> {
     if !valid_anchor_name(name) {
         return Result<Node, BuildError>.failure(BuildError(kind:BuildErrorKind.invalid_alias(), detail:"invalid YAML alias '$(name)'"))
     }
     return Result<Node, BuildError>.success(parsed_alias(name, 0, 0))
 }
 
-public func number_text(value:str) Node {
-    match try_number_text(value) {
-        failure(error) => { panic(error.detail) }
-        success(node) => { return node }
-    }
-}
-
-public func alias(name:str) Node {
-    match try_alias(name) {
-        failure(error) => { panic(error.detail) }
-        success(node) => { return node }
-    }
-}
 
 module func parsed_scalar(kind:int, text:str, style:int, line:int, column:int) Node {
     var result = Node(1, kind, text, line, column)

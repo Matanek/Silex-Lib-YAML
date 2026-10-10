@@ -100,7 +100,7 @@ test "parse an embedded-style string and a document stream" {
 
 test "write and read a local YAML file" {
     let path = "/private/tmp/silex-yaml-test.yml"
-    let ignored = FileSystem.remove_file(path)
+    let ignored = (try FileSystem.remove_file(path))
     var root = YAML.mapping()
     root.set("name", "local")
     root.set("workers", 4)
@@ -109,7 +109,7 @@ test "write and read a local YAML file" {
     var loaded = read_document(path)
     assert(string(loaded.root(), "name") == "local", "local YAML string")
     assert(integer(loaded.root(), "workers") == 4, "local YAML integer")
-    match FileSystem.remove_file(path) { failure(error) => { panic(error.detail) }; success => {} }
+    match (try FileSystem.remove_file(path)) { failure(error) => { panic(error.detail) }; success => {} }
 }
 
 test "preserve YAML presentation and structured forms" {
@@ -129,14 +129,14 @@ test "preserve YAML presentation and structured forms" {
 
 test "explicit parse limits remain opt-in" {
     let options = YAML.ParseOptions(maximum_bytes:4, maximum_depth:8, maximum_documents:1, maximum_aliases:0)
-    match YAML.try_parse("name: value", options) {
+    match (try YAML.parse("name: value", options)) {
         success(document) => { panic("YAML input exceeded its explicit byte limit") }
         failure(error) => { assert(error.kind == YAML.ParseErrorKind.input_limit(), "YAML input limit error") }
     }
 }
 
 test "reject an alias without a preceding anchor" {
-    match YAML.try_parse("value: *missing\n") {
+    match (try YAML.parse("value: *missing\n")) {
         success(document) => { panic("unknown YAML alias was accepted") }
         failure(error) => { assert(error.kind == YAML.ParseErrorKind.unknown_anchor(), "unknown YAML anchor error") }
     }
@@ -149,7 +149,7 @@ test "plain URLs retain their colon" {
 }
 
 test "reject tab indentation" {
-    match YAML.try_parse("window:\n\twidth: 1280\n") {
+    match (try YAML.parse("window:\n\twidth: 1280\n")) {
         success(document) => { panic("tab-indented YAML was accepted") }
         failure(error) => { assert(error.kind == YAML.ParseErrorKind.invalid_indentation(), "tab indentation error") }
     }
@@ -158,38 +158,38 @@ test "reject tab indentation" {
 test "structured YAML access failures remain opt in" {
     var document = parsed("name: Silex\nitems: [1]\n")
     var root = document.root()
-    match root.try_require("missing") {
+    match (try root.require("missing")) {
         success(value) => { panic("missing YAML key was returned") }
         failure(error) => {
             assert(error.kind == YAML.AccessErrorKind.missing_key(), "missing YAML key error")
         }
     }
-    match root.try_integer("name") {
+    match (try root.integer("name")) {
         success(value) => { panic("YAML string was projected as an integer") }
         failure(error) => { assert(error.kind == YAML.AccessErrorKind.invalid_scalar(), "YAML projection error") }
     }
     var items = root.sequence("items")
-    match items.try_at(2) {
+    match (try items.at(2)) {
         success(value) => { panic("out-of-bounds YAML node was returned") }
         failure(error) => { assert(error.kind == YAML.AccessErrorKind.index_out_of_bounds(), "YAML index error") }
     }
-    match root.try_append(YAML.string("invalid")) {
+    match (try root.append(YAML.string("invalid"))) {
         success => { panic("node was appended to a YAML mapping") }
         failure(error) => { assert(error.kind == YAML.AccessErrorKind.wrong_kind(), "YAML mutation error") }
     }
 }
 
 test "structured YAML construction and emission failures remain opt in" {
-    match YAML.try_number_text("not-a-number") {
+    match (try YAML.number_text("not-a-number")) {
         success(value) => { panic("invalid YAML number was constructed") }
         failure(error) => { assert(error.kind == YAML.BuildErrorKind.invalid_number(), "YAML number build error") }
     }
-    match YAML.try_alias("invalid alias") {
+    match (try YAML.alias("invalid alias")) {
         success(value) => { panic("invalid YAML alias was constructed") }
         failure(error) => { assert(error.kind == YAML.BuildErrorKind.invalid_alias(), "YAML alias build error") }
     }
     var document = parsed("name: Silex\n")
-    match YAML.try_emit(document, YAML.EmitOptions(indentation:0)) {
+    match (try YAML.emit(document, YAML.EmitOptions(indentation:0))) {
         success(text) => { panic("invalid YAML indentation was accepted") }
         failure(error) => { assert(error.kind == YAML.EmitErrorKind.invalid_indentation(), "YAML emission error") }
     }

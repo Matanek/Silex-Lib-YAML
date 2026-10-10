@@ -19,7 +19,8 @@ Importez ensuite son module public :
 use YAML
 ```
 
-YAML demande Silex 0.39.0 ou une version plus récente.
+Cette révision en développement requiert la toolchain qui distingue l’appel
+ordinaire et la capture `try` des opérations `Result`.
 
 ## Lire une première configuration
 
@@ -50,7 +51,7 @@ local. Un fichier incorporé à l’exécutable reste du texte ordinaire et pass
 par le même parseur :
 
 ```sx
-let defaults = YAML.parse(embed_text("Config/defaults.yml"))
+var defaults = YAML.parse(embed_text("Config/defaults.yml"))
 ```
 
 Les chemins d’assets sont relatifs au fichier `.sx` qui les référence. La
@@ -110,7 +111,7 @@ let options = YAML.ParseOptions(
     maximum_aliases:10000,
 )
 
-let world = YAML.read("Scenes/world.yml", options)
+var world = YAML.read("Scenes/world.yml", options)
 ```
 
 L’appel ordinaire n’a pas besoin de construire ces options : `read(path)` et
@@ -124,9 +125,13 @@ si un nœud ou scalaire n’a pas le type attendu, si le document est invalide o
 si un fichier est inaccessible. Elles ne convertissent jamais silencieusement
 une valeur inattendue en paramètre applicatif.
 
-Une application qui doit continuer peut utiliser `try_parse`,
-`try_parse_stream`, `try_read`, `try_read_stream`, `try_emit`, `try_write` et
-les opérations de nœud préfixées par `try_`. `ReadError` distingue les erreurs
+Chaque opération possède un seul nom et une seule déclaration `Result`.
+L’appel ordinaire rend la valeur attendue ou arrête le programme sur erreur.
+Ajoutez `try` pour conserver le résultat et traiter l’erreur :
+`var résultat = try YAML.parse(texte)`, puis `match résultat`. Les opérations
+sur les nœuds suivent le même modèle.
+
+`ReadError` distingue les erreurs
 de fichier des erreurs d’analyse ; `WriteError` distingue les erreurs d’émission
 de celles du fichier.
 

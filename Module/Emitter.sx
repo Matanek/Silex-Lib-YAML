@@ -27,7 +27,7 @@ package func emit_document(document:Document, options:EmitOptions) Result<str, E
         return Result<str, EmitError>.failure(EmitError(kind:EmitErrorKind.invalid_indentation(), detail:"YAML indentation must be between 1 and 16 spaces"))
     }
     var anchors:str[] = []
-    match validate_references(document.root(), anchors) {
+    match (try validate_references(document.root(), anchors)) {
         failure(error) => { return Result<str, EmitError>.failure(error) }
         success => {}
     }
@@ -46,7 +46,7 @@ package func emit_stream(stream:Stream, options:EmitOptions) Result<str, EmitErr
     while index < stream.count() {
         var document = stream.document(index)
         var anchors:str[] = []
-        match validate_references(document.root(), anchors) {
+        match (try validate_references(document.root(), anchors)) {
             failure(error) => { return Result<str, EmitError>.failure(error) }
             success => {}
         }
@@ -277,7 +277,7 @@ func validate_references(value:Node, anchors:&str[]) Result<void, EmitError> {
         var index = 0
         while index < value.count() {
             var child = value.sequence_item(index)
-            match validate_references(child, anchors) {
+            match (try validate_references(child, anchors)) {
                 failure(error) => { return Result<void, EmitError>.failure(error) }
                 success => {}
             }
@@ -287,12 +287,12 @@ func validate_references(value:Node, anchors:&str[]) Result<void, EmitError> {
         var index = 0
         while index < value.count() {
             var key = value.mapping_key(index)
-            match validate_references(key, anchors) {
+            match (try validate_references(key, anchors)) {
                 failure(error) => { return Result<void, EmitError>.failure(error) }
                 success => {}
             }
             var entry_value = value.mapping_value(index)
-            match validate_references(entry_value, anchors) {
+            match (try validate_references(entry_value, anchors)) {
                 failure(error) => { return Result<void, EmitError>.failure(error) }
                 success => {}
             }
